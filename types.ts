@@ -21,20 +21,27 @@ export interface AppSettings {
   openaiModel: string;
 
   // Crawler Settings
-  crawlerUrl?: string; // Optional: URL to the deployed python crawler (little_red_book)
+  crawlerUrl?: string; 
   
   // Map Settings
   amapKey: string;
   amapSecurityCode?: string;
 }
 
+export interface DestinationItem {
+  id: string;
+  name: string;
+}
+
 export interface UserPreferences {
-  destination: string;
-  duration: number;
+  destinations: DestinationItem[]; // Changed from single string to array
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
   budget: string;
   travelers: number;
-  style: TravelStyle;
+  style: string; // Changed from enum to string to allow custom input
   interests: string[];
+  additionalRequirements: string; // New field
 }
 
 export interface Location {
@@ -53,11 +60,12 @@ export interface Activity {
   costEstimate: string;
   category: 'sightseeing' | 'food' | 'transport' | 'hotel' | 'activity';
   confidenceScore: number; 
-  source?: string; // e.g., "小红书笔记"
+  source?: string; 
 }
 
 export interface DayPlan {
   day: number;
+  date?: string; // New field for specific date display
   weatherForecast: string;
   activities: Activity[];
 }
@@ -78,6 +86,14 @@ export interface Itinerary {
     pricePerNight: string;
     location: Location;
   };
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  isUpdating?: boolean;
 }
 
 export interface ProcessingLog {

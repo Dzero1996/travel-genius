@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { UserPreferences, Itinerary, AppSettings } from './types';
-import { generateItinerary } from './services/geminiService';
+import { generateItinerary, modifyItinerary } from './services/geminiService';
 import TravelForm from './components/TravelForm';
 import MapComponent from './components/MapComponent';
 import ProcessingView from './components/ProcessingLog';
 import SettingsModal from './components/SettingsModal';
-import { Map, Calendar, Sun, DollarSign, Star, ShieldCheck, Clock, Navigation, Settings, Download, Share2, RefreshCw } from 'lucide-react';
+import ChatInterface from './components/ChatInterface';
+import { Map, Calendar, Sun, DollarSign, Star, ShieldCheck, Clock, Navigation, Settings, Download, Share2, RefreshCw, MessageCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -13,10 +14,10 @@ const App: React.FC = () => {
   const [selectedDay, setSelectedDay] = useState<number>(0); 
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('travel_genius_settings');
-    // Default fallback settings
     const defaults: AppSettings = {
       provider: 'gemini',
       geminiApiKey: '',
@@ -27,14 +28,10 @@ const App: React.FC = () => {
       amapSecurityCode: '',
       crawlerUrl: ''
     };
-    
     if (saved) {
         try {
-            const parsed = JSON.parse(saved);
-            return { ...defaults, ...parsed }; // Merge to ensure new fields exist
-        } catch (e) {
-            return defaults;
-        }
+            return { ...defaults, ...JSON.parse(saved) }; 
+        } catch (e) { return defaults; }
     }
     return defaults;
   });
@@ -44,21 +41,18 @@ const App: React.FC = () => {
   }, [settings]);
 
   const handleSubmit = async (prefs: UserPreferences) => {
-    // Validation based on provider
     if (settings.provider === 'gemini' && !settings.geminiApiKey) {
-        setShowSettings(true);
-        setError("请配置 Google Gemini API Key");
-        return;
+        setShowSettings(true); setError("请配置 Google Gemini API Key"); return;
     }
     if (settings.provider === 'openai' && !settings.openaiApiKey) {
-        setShowSettings(true);
-        setError("请配置 OpenAI API Key");
-        return;
+        setShowSettings(true); setError("请配置 OpenAI API Key"); return;
     }
 
     setLoading(true);
     setError(null);
     setItinerary(null);
+    setShowChat(false);
+    
     try {
       const result = await generateItinerary(prefs, settings);
       setItinerary(result);
@@ -70,24 +64,27 @@ const App: React.FC = () => {
     }
   };
 
-  const handleExport = () => {
-    window.print();
+  const handleChatModification = async (msg: string) => {
+    if (!itinerary) return;
+    try {
+        const updated = await modifyItinerary(itinerary, msg, settings);
+        setItinerary(updated);
+    } catch (e: any) {
+        throw e;
+    }
   };
 
+  const handleExport = () => window.print();
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col h-screen overflow-hidden">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col h-screen overflow-hidden font-sans">
       <SettingsModal 
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)}
         initialSettings={settings}
-        onSave={(newSettings) => {
-            setSettings(newSettings);
-            setShowSettings(false);
-            setError(null);
-        }}
+        onSave={(newSettings) => { setSettings(newSettings); setShowSettings(false); setError(null); }}
       />
 
-      {/* Navbar */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center z-20 shadow-sm shrink-0 no-print">
         <div className="flex items-center gap-3">
           <div className="bg-gradient-to-tr from-teal-500 to-indigo-600 p-2 rounded-lg text-white">
@@ -99,49 +96,51 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setShowSettings(true)}
-            className="flex items-center gap-1 text-slate-600 hover:text-teal-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
-          >
+          {itinerary && !loading && (
+            <button 
+              onClick={() => setShowChat(true)} 
+              className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-sm font-medium px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition border border-indigo-200"
+            >
+              <MessageCircle size={16} /> 调整行程
+            </button>
+          )}
+          <button onClick={() => setShowSettings(true)} className="flex items-center gap-1 text-slate-600 hover:text-teal-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
             <Settings size={16} /> 设置
           </button>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden">
-        
+      <main className="flex-1 flex overflow-hidden relative">
+        {/* Chat Interface Layer */}
+        <ChatInterface 
+            isOpen={showChat} 
+            onClose={() => setShowChat(false)}
+            onSendMessage={handleChatModification}
+            isProcessing={false} // Chat handles its own internal loading state
+        />
+
         {/* Left Panel */}
         <div className="w-full lg:w-[480px] bg-white border-r border-slate-200 overflow-y-auto z-10 shadow-lg flex flex-col print-only w-full">
           
-          {/* Input Form Section */}
-          <div className={`${itinerary ? 'hidden' : 'block'} p-6 no-print`}>
-              <div className="mb-6 text-center">
-                <h2 className="text-3xl font-bold text-slate-800 mb-2">下一站，去哪儿？</h2>
-                <p className="text-slate-500">
-                    {settings.provider === 'gemini' ? 'Google Gemini 联网搜索中...' : 'AI Agent 准备就绪'}
-                </p>
-              </div>
+          <div className={`${itinerary ? 'hidden' : 'block'} p-0 no-print`}>
+              {/* Only show welcome msg if not loading */}
+              {!loading && (
+                  <div className="pt-8 pb-4 text-center">
+                    <h2 className="text-2xl font-bold text-slate-800 mb-2">下一站，去哪儿？</h2>
+                    <p className="text-sm text-slate-500">
+                        {settings.provider === 'gemini' ? 'Google Gemini 联网搜索中...' : 'AI Agent 准备就绪'}
+                    </p>
+                  </div>
+              )}
               <TravelForm onSubmit={handleSubmit} isLoading={loading} />
-              
-              <div className="mt-12 flex flex-wrap justify-center gap-3 opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                <span className="px-2 py-1 bg-slate-100 rounded border border-slate-200 text-xs font-mono">{settings.provider === 'gemini' ? 'Gemini 2.5' : settings.openaiModel}</span>
-                <span className="px-2 py-1 bg-slate-100 rounded border border-slate-200 text-xs font-mono">React</span>
-                <span className={`px-2 py-1 rounded border text-xs font-mono ${settings.crawlerUrl ? 'bg-pink-100 text-pink-700 border-pink-200' : 'bg-slate-100 border-slate-200'}`}>
-                    {settings.crawlerUrl ? '外部爬虫: On' : '小红书模拟: On'}
-                </span>
-                <span className="px-2 py-1 bg-slate-100 rounded border border-slate-200 text-xs font-mono">AMap</span>
-              </div>
           </div>
 
-          {/* Loading State */}
           {loading && (
             <div className="p-6 flex-1 flex flex-col justify-center">
                <ProcessingView isProcessing={loading} />
             </div>
           )}
           
-          {/* Error State */}
           {error && (
             <div className="p-6 m-6 bg-red-50 text-red-700 rounded-lg border border-red-200 flex justify-between items-center">
               <span>{error}</span>
@@ -149,26 +148,36 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Itinerary Display */}
           {itinerary && !loading && (
-            <div className="flex-1 overflow-y-auto bg-slate-50">
+            <div className="flex-1 overflow-y-auto bg-slate-50 relative">
+              
+              {/* Floating Chat Button */}
+              {!showChat && (
+                  <button 
+                    onClick={() => setShowChat(true)}
+                    className="fixed bottom-8 right-8 z-50 bg-indigo-600 text-white p-3 md:p-4 rounded-full shadow-xl hover:bg-indigo-700 hover:scale-105 transition-all flex items-center justify-center animate-bounce-slow"
+                    title="告诉 AI 修改意见"
+                  >
+                    <MessageCircle size={28} />
+                    <span className="absolute -top-2 -right-2 flex h-4 w-4">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-4 w-4 bg-pink-500"></span>
+                    </span>
+                  </button>
+              )}
+
               {/* Header Card */}
               <div className="bg-white p-6 border-b border-slate-200 sticky top-0 z-10 shadow-sm no-print">
                  <div className="flex justify-between items-start mb-2">
-                    <button 
-                        onClick={() => setItinerary(null)}
-                        className="text-xs text-teal-600 hover:underline flex items-center gap-1"
-                    >
+                    <button onClick={() => setItinerary(null)} className="text-xs text-teal-600 hover:underline flex items-center gap-1">
                         <RefreshCw size={12} /> 重新规划
                     </button>
-                    <div className="flex gap-2">
-                         <button onClick={handleExport} className="text-slate-500 hover:text-teal-600 p-1.5 rounded hover:bg-slate-100" title="导出 PDF">
-                             <Download size={18} />
-                         </button>
-                    </div>
+                    <button onClick={handleExport} className="text-slate-500 hover:text-teal-600 p-1.5 rounded hover:bg-slate-100">
+                        <Download size={18} />
+                    </button>
                  </div>
-                 <h2 className="text-2xl font-bold text-slate-800">{itinerary.tripTitle}</h2>
-                 <p className="text-slate-600 text-sm mt-1 mb-3">{itinerary.summary}</p>
+                 <h2 className="text-2xl font-bold text-slate-800 leading-tight">{itinerary.tripTitle}</h2>
+                 <p className="text-slate-600 text-sm mt-2 mb-3 leading-relaxed">{itinerary.summary}</p>
                  
                  <div className="flex gap-4 text-sm font-medium text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
                     <div className="flex items-center gap-1"><DollarSign size={14} className="text-teal-500"/> {itinerary.totalCostEstimate}</div>
@@ -190,13 +199,7 @@ const App: React.FC = () => {
                              <div className="text-[10px] text-slate-400">/晚</div>
                         </div>
                     </div>
-                    <div className="mt-2 flex gap-2">
-                         <span className="text-xs px-2 py-1 bg-yellow-50 text-yellow-700 rounded border border-yellow-100 flex items-center gap-1">
-                            <Star size={10} fill="currentColor" /> {itinerary.hotelSuggestion.rating}
-                         </span>
-                    </div>
                  </div>
-
                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">交通建议</h3>
                     <div className="flex justify-between items-center">
@@ -231,7 +234,10 @@ const App: React.FC = () => {
                 {itinerary.days.filter(d => selectedDay === 0 || d.day === selectedDay).map((day) => (
                     <div key={day.day} className="relative pl-4 border-l-2 border-slate-200 ml-2">
                         <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-teal-100 border-2 border-teal-500"></div>
-                        <h3 className="text-lg font-bold text-slate-800 mb-1 pl-2">第 {day.day} 天</h3>
+                        <div className="flex items-baseline gap-2 mb-1 pl-2">
+                             <h3 className="text-lg font-bold text-slate-800">第 {day.day} 天</h3>
+                             {day.date && <span className="text-xs text-slate-400 font-mono">{day.date}</span>}
+                        </div>
                         <div className="flex items-center gap-2 text-sm text-slate-500 mb-4 pl-2">
                             <Sun size={14} className="text-orange-400" /> {day.weatherForecast}
                         </div>
