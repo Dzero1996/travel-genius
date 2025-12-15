@@ -1,0 +1,7 @@
+{
+  "name": "智游 AI (TravelGenius)",
+  "description": "基于AI和大数据的智能旅游规划助手，集成高德地图与全网攻略分析。",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
