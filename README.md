@@ -17,6 +17,11 @@
     *   **风格与兴趣**: 内置“特种兵”、“Citywalk”等多种旅行风格，支持自定义标签。
     *   **小红书风格**: 模拟资深博主口吻，提供网红打卡点、避雷指南和本地美食推荐。
 
+*   **🔌 内置 MCP 工具 (Model Context Protocol)**:
+    *   **实时天气查询**: AI 自动调用高德天气接口，根据当地天气调整行程建议（需配置 Web 服务 Key）。
+    *   **POI 地点搜索**: AI 通过高德数据验证地点真实性、评分和位置，减少“幻觉”。
+    *   **外部扩展**: 支持连接外部 SSE MCP Server，扩展更多私有工具能力。
+
 *   **🗺️ 交互式地图集成**:
     *   **高德地图 (AMap)**: 自动将生成的景点、餐厅、酒店绘制在地图上。
     *   **路线可视化**: 每日行程路径连线，直观展示游玩动线。
@@ -29,7 +34,6 @@
 *   **⚙️ 灵活的模型配置**:
     *   **Google Gemini**: 原生集成，支持 Google Search Grounding (联网搜索) 获取最新数据。
     *   **OpenAI 兼容模式**: 支持接入 GPT-4, DeepSeek, Moonshot (Kimi) 等兼容 OpenAI 接口的模型。
-    *   **外部爬虫接入**: 预留接口可接入 Python 后端爬虫，获取更深度的私有数据。
 
 *   **📱 现代化 UI/UX**:
     *   响应式布局，适配桌面与移动端。
@@ -43,7 +47,8 @@
 *   **样式库**: Tailwind CSS
 *   **图标库**: Lucide React
 *   **AI SDK**: `@google/genai` (Google 官方 SDK)
-*   **地图服务**: `@amap/amap-jsapi-loader` (高德地图)
+*   **地图服务**: `@amap/amap-jsapi-loader` (高德地图 JS API) & Fetch API (高德 Web 服务)
+*   **协议标准**: Model Context Protocol (MCP) via SSE
 
 ## 🚀 快速开始
 
@@ -94,12 +99,19 @@ npm run dev
 
 ### 2. 高德地图配置 (必须)
 
-*   访问 [高德开放平台](https://console.amap.com/dev/key/app)。
-*   创建应用并申请 Key。
-*   **注意**: 必须选择 **"Web端 (JS API)"** 类型的 Key。
-*   配置位置: 设置 -> 地图服务。
-    *   **Web端 Key**: 填入您申请的 Key。
-    *   **安全密钥 (Security Code)**: 为了在本地开发环境顺利加载地图，建议配置安全密钥。
+访问 [高德开放平台](https://console.amap.com/dev/key/app) 创建应用。本应用需要两种类型的 Key 以获得最佳体验：
+
+1.  **Web端 (JS API) Key** <span style="color:red">*必须</span>
+    *   **用途**: 用于在网页右侧渲染交互式地图组件。
+    *   **申请类型**: 选择 **"Web端 (JS API)"**。
+    *   **配置位置**: 设置 -> 地图服务 -> `Web端 (JS API) Key`。
+    *   **安全密钥**: 推荐配合配置 `Security Code` 以避免本地开发时的跨域或鉴权限制。
+
+2.  **Web服务 Key** <span style="color:green">*可选 (推荐)*</span>
+    *   **用途**: 供 AI Agent 后台调用，执行 **天气查询** 和 **POI 搜索** 等 MCP 工具函数。
+    *   **申请类型**: 选择 **"Web服务"**。
+    *   **配置位置**: 设置 -> 地图服务 -> `Web服务 (Web Service) Key`。
+    *   **注意**: 如果不配置此 Key，AI 将无法准确获取天气和具体地点信息，仅凭模型知识库生成。
 
 ## 📂 项目结构
 
@@ -112,7 +124,9 @@ src/
 │   ├── SettingsModal.tsx    # 设置弹窗
 │   └── TravelForm.tsx       # 首页输入表单
 ├── services/
-│   └── geminiService.ts     # AI 核心逻辑 (生成、验证、修改)
+│   ├── geminiService.ts     # AI 核心逻辑 (生成、验证、修改)
+│   ├── mcpService.ts        # 外部 MCP (SSE) 客户端实现
+│   └── amapTools.ts         # 内置高德 MCP 工具定义
 ├── types.ts             # TypeScript 类型定义
 ├── App.tsx              # 主应用入口
 ├── index.tsx            # 挂载点
@@ -124,11 +138,11 @@ src/
 **Q: 地图无法加载，显示白屏或报错？**
 A: 请确保您在高德控制台申请的是 **Web端 (JS API)** Key，而不是 Web 服务 Key。如果您在 Codesandbox 或特定受限环境中运行，可能会因为 referrer 限制导致地图被拦截，请尝试在设置中配置 Security Code。
 
+**Q: 为什么我有 Key 但 AI 说无法查询天气？**
+A: 请检查您是否配置了 **"Web服务 Key"**。地图显示的 Key (JS API) 不能用于后端数据查询 API，必须单独申请一个 **"Web服务"** 类型的 Key 并填入对应配置项。
+
 **Q: AI 生成速度很慢？**
 A: 这是一个复杂的推理任务。Gemini 通常需要 10-20 秒来生成完整的 3-5 天行程，尤其是开启了 Google Search 联网功能时。请耐心等待“处理日志”动画完成。
-
-**Q: 为什么生成的地点在地图上位置不对？**
-A: AI 会尽力返回经纬度，但偶尔会产生幻觉。系统会自动尝试在地图上标记，如果坐标偏差过大，地图标记可能会偏离。
 
 ## 📄 许可证
 
