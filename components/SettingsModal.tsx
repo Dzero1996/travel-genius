@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { AppSettings } from '../types';
-import { Settings, X, Save, Server, Globe, Bot, Activity, Wifi, Map as MapIcon, Info, Link2, Zap, Check } from 'lucide-react';
+import { Settings, X, Save, Server, Globe, Bot, Activity, Wifi, Map as MapIcon, Info, Link2, Zap, Check, Network, Plug2 } from 'lucide-react';
 import { validateAIConnection, testAIGeneration } from '../services/geminiService';
+import { McpClient } from '../services/mcpService';
 
 interface Props {
   isOpen: boolean;
@@ -12,12 +13,15 @@ interface Props {
 
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettings }) => {
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
-  const [activeTab, setActiveTab] = useState<'ai' | 'map'>('ai');
+  const [activeTab, setActiveTab] = useState<'ai' | 'mcp' | 'map'>('ai');
   
   // States for AI testing
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [connectStatus, setConnectStatus] = useState<{loading: boolean, msg: string, type: 'success' | 'error' | null}>({ loading: false, msg: '', type: null });
   const [genStatus, setGenStatus] = useState<{loading: boolean, msg: string, type: 'success' | 'error' | null}>({ loading: false, msg: '', type: null });
+
+  // States for MCP testing
+  const [mcpStatus, setMcpStatus] = useState<{loading: boolean, msg: string, type: 'success' | 'error' | null}>({ loading: false, msg: '', type: null });
 
   // States for Map testing
   const [mapTestStatus, setMapTestStatus] = useState<{loading: boolean, msg: string, type: 'success' | 'error' | null}>({ loading: false, msg: '', type: null });
@@ -27,6 +31,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
     // Reset statuses when opening
     setConnectStatus({ loading: false, msg: '', type: null });
     setGenStatus({ loading: false, msg: '', type: null });
+    setMcpStatus({ loading: false, msg: '', type: null });
     setMapTestStatus({ loading: false, msg: '', type: null });
     setFetchedModels([]);
   }, [initialSettings, isOpen]);
@@ -56,6 +61,28 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
           msg: result.message, 
           type: result.success ? 'success' : 'error' 
       });
+  };
+
+  const handleTestMcp = async () => {
+     if (!settings.mcpEndpoint) {
+         setMcpStatus({ loading: false, msg: '请输入 MCP Endpoint', type: 'error' });
+         return;
+     }
+     setMcpStatus({ loading: true, msg: '尝试连接 MCP Server (SSE)...', type: null });
+     
+     const client = new McpClient(settings.mcpEndpoint);
+     try {
+         await client.connect();
+         const tools = await client.listTools();
+         client.disconnect();
+         setMcpStatus({ 
+             loading: false, 
+             msg: `连接成功！发现 ${tools.length} 个工具: ${tools.map(t => t.name).join(', ')}`, 
+             type: 'success' 
+         });
+     } catch (e: any) {
+         setMcpStatus({ loading: false, msg: `连接失败: ${e.message}`, type: 'error' });
+     }
   };
 
   const handleTestMap = () => {
@@ -95,7 +122,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
                 onClick={() => setActiveTab('ai')}
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'ai' ? 'text-teal-600 border-b-2 border-teal-600 bg-teal-50/50' : 'text-slate-600 hover:bg-slate-50'}`}
             >
-                <div className="flex items-center justify-center gap-2"><Bot size={16}/> AI & 数据源</div>
+                <div className="flex items-center justify-center gap-2"><Bot size={16}/> AI 模型</div>
+            </button>
+            <button 
+                onClick={() => setActiveTab('mcp')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'mcp' ? 'text-teal-600 border-b-2 border-teal-600 bg-teal-50/50' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+                <div className="flex items-center justify-center gap-2"><Network size={16}/> MCP 协议</div>
             </button>
             <button 
                 onClick={() => setActiveTab('map')}
@@ -248,20 +281,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
                                         ))}
                                     </datalist>
                                 </div>
-                                
-                                {fetchedModels.length === 0 && (
-                                    <div className="flex gap-2 mt-1.5 overflow-x-auto no-scrollbar">
-                                        {['deepseek-chat', 'gpt-3.5-turbo', 'moonshot-v1-8k'].map(m => (
-                                            <button 
-                                                key={m}
-                                                onClick={() => setSettings({...settings, openaiModel: m})}
-                                                className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-500 hover:border-indigo-300 hover:text-indigo-600 whitespace-nowrap"
-                                            >
-                                                {m}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </div>
@@ -315,29 +334,82 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
                         </div>
                     )}
                 </div>
-
-                {/* Crawler Config */}
-                <div className="pt-4 border-t border-slate-100">
-                     <div className="flex items-center gap-2 mb-3">
-                        <Globe size={16} className="text-pink-500"/>
-                        <label className="text-sm font-bold text-slate-700">外部爬虫接入 (可选)</label>
-                     </div>
-                     <div className="bg-pink-50 p-4 rounded-lg border border-pink-100">
-                        <div className="flex items-start gap-2 mb-2">
-                            <Info size={14} className="text-pink-400 mt-0.5 shrink-0"/>
-                            <p className="text-[10px] text-pink-700 leading-tight">如果不配置，系统将尝试使用 AI 自带的知识库或搜索工具来模拟获取数据。</p>
-                        </div>
-                        <label className="block text-xs text-slate-600 mb-1">爬虫服务 API 地址</label>
-                        <input 
-                            type="text" 
-                            value={settings.crawlerUrl || ''}
-                            onChange={(e) => setSettings({...settings, crawlerUrl: e.target.value})}
-                            className="w-full px-3 py-2 border border-pink-200 rounded text-sm focus:ring-1 focus:ring-pink-500 outline-none placeholder-pink-200"
-                            placeholder="http://localhost:8000 (Python backend)"
-                        />
-                     </div>
-                </div>
              </div>
+          )}
+
+          {activeTab === 'mcp' && (
+              <div className="space-y-6">
+                  <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-6 rounded-xl text-white shadow-lg">
+                      <div className="flex items-start gap-3">
+                          <Network size={32} className="opacity-80"/>
+                          <div>
+                              <h4 className="font-bold text-lg mb-1">Model Context Protocol (MCP)</h4>
+                              <p className="text-xs opacity-90 leading-relaxed">
+                                  MCP 是一个开放标准，允许 AI 助手连接到外部数据和工具。启用后，TravelGenius 将能调用您本地或远程服务器上的工具（如：实时航班查询、私有知识库检索）。
+                              </p>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+                      <div className="flex items-center justify-between">
+                          <label className="text-sm font-bold text-slate-700">启用外部 MCP 支持</label>
+                          <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                              <input 
+                                  type="checkbox" 
+                                  name="toggle" 
+                                  id="mcp-toggle" 
+                                  checked={settings.enableMcp}
+                                  onChange={(e) => setSettings({...settings, enableMcp: e.target.checked})}
+                                  className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer peer checked:right-0 right-5"
+                              />
+                              <label htmlFor="mcp-toggle" className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer transition-colors ${settings.enableMcp ? 'bg-teal-500' : 'bg-slate-300'}`}></label>
+                          </div>
+                          <style>{`
+                              #mcp-toggle:checked + label { background-color: #14b8a6; }
+                              #mcp-toggle:checked { right: 0; border-color: #14b8a6; }
+                              #mcp-toggle { right: 20px; border-color: #cbd5e1; transition: all 0.3s; }
+                          `}</style>
+                      </div>
+
+                      {settings.enableMcp && (
+                        <div className="space-y-3 animate-fadeIn">
+                             <div>
+                                 <label className="block text-xs text-slate-600 mb-1">MCP SSE Endpoint URL</label>
+                                 <input 
+                                     type="text" 
+                                     value={settings.mcpEndpoint || ''}
+                                     onChange={(e) => setSettings({...settings, mcpEndpoint: e.target.value})}
+                                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-teal-500 outline-none font-mono text-slate-600"
+                                     placeholder="http://localhost:3000/sse"
+                                 />
+                                 <div className="flex items-start gap-1 mt-2 text-[10px] text-slate-500">
+                                     <Info size={12} className="mt-0.5 shrink-0"/>
+                                     <span>需要运行支持 SSE 传输的 MCP Server。浏览器环境不支持标准 Stdio 连接。</span>
+                                 </div>
+                             </div>
+
+                             <div className="flex flex-col gap-2">
+                                <button 
+                                    onClick={handleTestMcp} 
+                                    disabled={mcpStatus.loading}
+                                    className="w-full px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition"
+                                >
+                                    {mcpStatus.loading ? <Plug2 size={16} className="animate-pulse"/> : <Plug2 size={16}/>}
+                                    {mcpStatus.loading ? "正在握手..." : "测试连接 & 获取工具列表"}
+                                </button>
+                                
+                                {mcpStatus.msg && (
+                                    <div className={`p-3 rounded-lg text-xs flex items-start gap-2 ${mcpStatus.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+                                        <Activity size={14} className="shrink-0 mt-0.5" />
+                                        <span className="break-all">{mcpStatus.msg}</span>
+                                    </div>
+                                )}
+                             </div>
+                        </div>
+                      )}
+                  </div>
+              </div>
           )}
 
           {activeTab === 'map' && (
@@ -369,11 +441,28 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialSettin
                             placeholder="JS API 安全密钥 (推荐配置)"
                             />
                         </div>
+                        
+                        <div className="pt-2 border-t border-blue-100 mt-2">
+                             <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xs font-bold text-teal-700 flex items-center gap-1"><Network size={12}/> Amap Built-in MCP</span>
+                             </div>
+                            <label className="block text-xs text-slate-600 mb-1">Web服务 (Web Service) Key <span className="text-xs text-slate-400 font-normal">(可选，用于 AI 工具)</span></label>
+                            <input 
+                                type="text" 
+                                value={settings.amapWebServiceKey || ''}
+                                onChange={(e) => setSettings({...settings, amapWebServiceKey: e.target.value})}
+                                className="w-full px-3 py-2 border border-teal-200 rounded text-sm focus:ring-1 focus:ring-teal-500 outline-none font-mono"
+                                placeholder="高德 Web 服务 Key (用于天气、POI搜索工具)"
+                            />
+                             <p className="text-[10px] text-slate-500 mt-1">
+                                配置后，AI 将具备调用高德 <b>天气查询</b> 和 <b>POI 搜索</b> 的能力，生成的行程信息更准确。请确保该 Key 开启了 Web 服务权限。
+                            </p>
+                        </div>
                     </div>
                   </div>
                   <div className="flex justify-end">
                     <button onClick={handleTestMap} disabled={mapTestStatus.loading} className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-teal-700 hover:bg-slate-50 shadow-sm flex items-center gap-2 font-medium transition-colors">
-                        {mapTestStatus.loading ? '连接中...' : <><Wifi size={14}/> 测试网络连通性</>}
+                        {mapTestStatus.loading ? '连接中...' : <><Wifi size={14}/> 测试 JS API 网络连通性</>}
                     </button>
                 </div>
                 {mapTestStatus.msg && (

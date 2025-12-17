@@ -26,7 +26,10 @@ const App: React.FC = () => {
       openaiModel: 'gpt-3.5-turbo',
       amapKey: '',
       amapSecurityCode: '',
-      crawlerUrl: ''
+      amapWebServiceKey: '', // Initialize new key
+      crawlerUrl: '',
+      enableMcp: false,
+      mcpEndpoint: ''
     };
     if (saved) {
         try {

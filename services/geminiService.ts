@@ -1,5 +1,7 @@
-import { GoogleGenAI, Schema, Type } from "@google/genai";
+import { GoogleGenAI, Schema, Type, FunctionDeclaration, Content, Part } from "@google/genai";
 import { UserPreferences, Itinerary, AppSettings } from "../types";
+import { McpClient } from "./mcpService";
+import { AMAP_TOOLS, executeAmapTool } from "./amapTools";
 
 // Helper: Clean JSON
 const cleanJsonString = (str: string) => {
@@ -179,6 +181,30 @@ export const generateItinerary = async (prefs: UserPreferences, settings: AppSet
       crawlerData = await fetchFromCrawler(settings.crawlerUrl, destinationStr);
   }
 
+  // Strategy 2: MCP Tools Setup (External SSE)
+  let mcpTools: FunctionDeclaration[] = [];
+  let mcpClient: McpClient | null = null;
+  let mcpStatusMsg = "";
+
+  if (settings.enableMcp && settings.mcpEndpoint) {
+      try {
+          mcpClient = new McpClient(settings.mcpEndpoint);
+          await mcpClient.connect();
+          mcpTools = await mcpClient.listTools();
+          mcpStatusMsg += `[External MCP] 已连接，加载了 ${mcpTools.length} 个外部工具。\n`;
+      } catch (e) {
+          console.error("MCP Setup Failed:", e);
+          mcpStatusMsg += "[External MCP] 连接失败。\n";
+      }
+  }
+
+  // Strategy 3: Built-in Amap MCP
+  let builtInTools: FunctionDeclaration[] = [];
+  if (settings.amapWebServiceKey) {
+      builtInTools = AMAP_TOOLS;
+      mcpStatusMsg += `[Built-in Amap MCP] 已启用高德地图工具 (天气、POI搜索)。\n`;
+  }
+
   const systemPrompt = `
     你是一个智能旅游规划 Agent。
     行程信息：
@@ -195,26 +221,105 @@ export const generateItinerary = async (prefs: UserPreferences, settings: AppSet
     2. 必须提供精确经纬度(lat, lng)适配高德地图。
     3. 如果是多目的地，请根据地理位置合理规划动线。
     4. 严格输出 JSON 格式。
+    5. 若启用了工具，请积极调用工具查询天气、寻找真实POI信息，以确保行程真实性。
+    ${mcpStatusMsg}
   `;
 
   if (settings.provider === 'gemini') {
       if (!settings.geminiApiKey) throw new Error("请配置 Gemini API Key");
       const ai = new GoogleGenAI({ apiKey: settings.geminiApiKey });
+      
       const prompt = `请规划行程。${crawlerData ? `参考数据: ${crawlerData}` : `使用 Google Search 搜索 "site:xiaohongshu.com ${destinationStr} 旅游攻略 避雷"。`}`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: "application/json",
-            responseSchema: itinerarySchema,
-            tools: [{ googleSearch: {} }] 
+      // Build Tool Config
+      const toolsConfig: any[] = [{ googleSearch: {} }];
+      
+      const allFunctionDecls = [...mcpTools, ...builtInTools];
+      if (allFunctionDecls.length > 0) {
+          toolsConfig.push({ functionDeclarations: allFunctionDecls });
+      }
+
+      // Initial Message
+      const history: Content[] = [
+         { role: 'user', parts: [{ text: prompt }] }
+      ];
+
+      // Interaction Loop (Model -> Tool -> Model -> Final)
+      const maxTurns = 10;
+      let finalItinerary: Itinerary | null = null;
+      
+      for (let i = 0; i < maxTurns; i++) {
+        
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: history,
+            config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json", 
+                responseSchema: itinerarySchema, 
+                tools: toolsConfig
+            }
+        });
+
+        const call = response.functionCalls?.[0]; // Check for tool calls
+        
+        if (call) {
+            // 1. Add Model's Turn
+            history.push(response.candidates[0].content);
+
+            // 2. Execute Tool
+            let toolResult = "";
+            let toolName = call.name;
+
+            // Handle Built-in Amap Tools
+            if (toolName.startsWith("amap_")) {
+                 toolResult = await executeAmapTool(toolName, call.args, settings.amapWebServiceKey || "");
+            } 
+            // Handle External MCP Tools
+            else if (mcpClient) {
+                try {
+                    const result = await mcpClient.callTool(call.name, call.args);
+                    toolResult = typeof result === 'string' ? result : JSON.stringify(result);
+                } catch (err: any) {
+                    toolResult = `Error executing external tool ${call.name}: ${err.message}`;
+                }
+            } else {
+                toolResult = "Error: Tool not found or client not connected.";
+            }
+
+            // 3. Add Tool Response to History
+            history.push({
+                role: 'tool',
+                parts: [{
+                    functionResponse: {
+                        name: call.name,
+                        response: { result: toolResult }
+                    }
+                }]
+            });
+            
+        } else {
+            // No tool call, assume final answer (JSON)
+            if (response.text) {
+                try {
+                    finalItinerary = JSON.parse(response.text) as Itinerary;
+                    break; 
+                } catch (e) {
+                    console.warn("Failed to parse JSON", e);
+                    throw new Error("Gemini returned invalid JSON");
+                }
+            } else {
+               throw new Error("Gemini returned empty response");
+            }
         }
-      });
-      if (!response.text) throw new Error("Gemini 返回为空");
-      return JSON.parse(response.text) as Itinerary;
+      }
+
+      if (mcpClient) mcpClient.disconnect();
+      if (!finalItinerary) throw new Error("Failed to generate valid itinerary after multiple turns.");
+      return finalItinerary;
+
   } else {
+      // OpenAI Logic (Simplified - MCP not fully implemented for OpenAI path in this demo)
       if (!settings.openaiApiKey) throw new Error("请配置 OpenAI 参数");
       const prompt = `${systemPrompt}\n\n请返回符合 Schema 的 JSON。${crawlerData ? `参考: ${crawlerData}` : ''}`;
 

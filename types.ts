@@ -22,10 +22,15 @@ export interface AppSettings {
 
   // Crawler Settings
   crawlerUrl?: string; 
+
+  // MCP Settings
+  enableMcp: boolean;
+  mcpEndpoint: string; // SSE Endpoint
   
   // Map Settings
-  amapKey: string;
+  amapKey: string; // JS API Key
   amapSecurityCode?: string;
+  amapWebServiceKey?: string; // Web Service Key for Amap MCP Tools
 }
 
 export interface DestinationItem {
@@ -90,7 +95,7 @@ export interface Itinerary {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: number;
   isUpdating?: boolean;
